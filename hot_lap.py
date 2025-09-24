@@ -28,7 +28,7 @@ collision_sound = pygame.mixer.Sound('assets/collision.wav')
 
 # Car properties
 car_width, car_height = 35, 70  # Made smaller: was 53x102, now 35x70
-car_x = 240  # Start slightly to the right of the start line
+car_x = 50  # Start slightly to the right of the start line
 car_y = 320  # Start slightly below the start line center
 car_speed = 5
 car_angle = 0  # Facing up initially (0 degrees)
@@ -45,7 +45,7 @@ track_walls = [
 ]
 
 # Start/Finish line (vertical line on the left-center)
-start_line = pygame.Rect(210, 250, 10, 100)  # Left-center position, shorter line
+start_line = pygame.Rect(0, 250, 100, 10)  # Left-center position, shorter line
 
 # Timer variables
 start_time = None
@@ -131,7 +131,7 @@ while running:
     pygame.draw.rect(screen, GREEN, start_line)
 
     # Draw car (rotated)
-    rotated_car = pygame.transform.rotate(car_image, car_angle)
+    rotated_car = pygame.transform.rotate(car_image, -car_angle)  # Negative angle for correct visual
     rotated_rect = rotated_car.get_rect(center=car_rect.center)
     screen.blit(rotated_car, rotated_rect.topleft)
 
