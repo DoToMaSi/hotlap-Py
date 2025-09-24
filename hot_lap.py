@@ -74,7 +74,9 @@ class GameAssets:
         
         # Load images
         self.track_image = pygame.image.load('assets/track.png')
-        self.car_image = pygame.image.load('assets/car.png')
+        # Load and vertically flip the car image to correct orientation
+        car_image_raw = pygame.image.load('assets/car.png')
+        self.car_image = pygame.transform.flip(car_image_raw, False, True)
         
         # Load sounds
         self.engine_sound = pygame.mixer.Sound('assets/car.wav')
@@ -142,12 +144,12 @@ class Car:
     
     def update_progressive_inputs(self, dt: float):
         """Update throttle and brake progressively towards target values."""
-        # Update throttle progressively
+        # Update throttle progressively (handles both forward and reverse)
         if self.target_throttle > self.throttle:
-            # Accelerating towards target
+            # Accelerating towards target (forward or reverse)
             self.throttle = min(self.target_throttle, self.throttle + self.throttle_rate * dt)
         elif self.target_throttle < self.throttle:
-            # Releasing throttle (faster release for more responsive feel)
+            # Releasing throttle or moving towards reverse
             release_rate = self.throttle_rate * 2.0  # Release twice as fast
             self.throttle = max(self.target_throttle, self.throttle - release_rate * dt)
         
@@ -161,8 +163,8 @@ class Car:
             self.brake = max(self.target_brake, self.brake - release_rate * dt)
     
     def set_throttle_input(self, input_value: float):
-        """Set target throttle from input (0.0 to 1.0)."""
-        self.target_throttle = max(0.0, min(1.0, input_value))
+        """Set target throttle from input (-1.0 to 1.0, negative for reverse)."""
+        self.target_throttle = max(-1.0, min(1.0, input_value))
     
     def set_brake_input(self, input_value: float):
         """Set target brake from input (0.0 to 1.0)."""
@@ -372,8 +374,8 @@ class Car:
                 self.set_brake_input(1.0)
                 self.set_throttle_input(0.0)  # Can't throttle while braking
             else:
-                # Reverse throttle
-                self.set_throttle_input(-0.7)  # Reduced reverse power
+                # Reverse throttle - set negative target throttle for reverse
+                self.target_throttle = -1.8  # Increased from -0.7 for faster reverse
                 self.set_brake_input(0.0)
         else:
             self.set_brake_input(0.0)
@@ -595,40 +597,118 @@ class LapTimer:
         return True
     
     def get_current_time(self) -> float:
-        """Get current lap time."""
+        """Get current lap time, clamped to maximum of 60 seconds."""
         if self.start_time is None:
             return 0.0
-        return time.time() - self.start_time
+        current_time = time.time() - self.start_time
+        return min(current_time, 60.0)  # Clamp to maximum 60 seconds
 
 
 class GameUI:
-    """Handles user interface rendering with enhanced car information."""
+    """Handles user interface rendering with enhanced styled rectangles."""
     
     def __init__(self):
         """Initialize UI components."""
         self.font = pygame.font.Font(None, FONT_SIZE)
         self.small_font = pygame.font.Font(None, 24)
+        
+        # UI styling constants
+        self.box_padding = 12
+        self.box_margin = 8
+        self.border_width = 2
+        self.border_radius = 8
+        
+        # Colors with transparency
+        self.box_bg_color = (0, 0, 0, 180)  # Semi-transparent black
+        self.border_color = WHITE
+    
+    def format_time(self, seconds: float) -> str:
+        """Format time in M:SS.ss format without leading zeros for minutes, or as seconds if at maximum."""
+        if seconds == float('inf'):
+            return "--:--"
+        
+        # If at maximum time (60 seconds), show as seconds format
+        if seconds >= 60.0:
+            return f"{seconds:.2f}s"
+        
+        minutes = int(seconds // 60)
+        remaining_seconds = seconds % 60
+        
+        if minutes > 0:
+            return f"{minutes}:{remaining_seconds:05.2f}"
+        else:
+            return f"{remaining_seconds:.2f}s"
+    
+    def draw_rounded_rect_with_border(self, surface: pygame.Surface, rect: pygame.Rect, 
+                                    bg_color: tuple, border_color: tuple, border_width: int, border_radius: int):
+        """Draw a rounded rectangle with border and semi-transparent background."""
+        # Create a temporary surface for the rounded rectangle with transparency
+        temp_surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        
+        # Draw the background rectangle
+        pygame.draw.rect(temp_surface, bg_color, (0, 0, rect.width, rect.height), border_radius=border_radius)
+        
+        # Draw the border
+        pygame.draw.rect(temp_surface, border_color, (0, 0, rect.width, rect.height), 
+                        width=border_width, border_radius=border_radius)
+        
+        # Blit to main surface
+        surface.blit(temp_surface, rect.topleft)
     
     def draw_timer_info(self, screen: pygame.Surface, timer: LapTimer):
-        """Draw timing information on the left side."""
+        """Draw timing information with styled rounded rectangle background."""
         if timer.start_time is not None:
             current_time = timer.get_current_time()
-            time_text = self.font.render(f"Time: {current_time:.2f}s", True, WHITE)
+            current_display = self.format_time(current_time)
+            best_display = self.format_time(timer.best_time) if timer.best_time != float('inf') else "--:--"
+            last_display = self.format_time(timer.last_lap_time) if timer.last_lap_time is not None else "--:--"
             
-            best_display = f"{timer.best_time:.2f}s" if timer.best_time != float('inf') else "--"
+            # Render text
+            time_text = self.font.render(f"Time: {current_display}", True, WHITE)
             best_text = self.font.render(f"Best: {best_display}", True, WHITE)
-            
-            last_display = f"{timer.last_lap_time:.2f}s" if timer.last_lap_time is not None else "--"
             last_text = self.font.render(f"Last: {last_display}", True, WHITE)
             
-            screen.blit(time_text, (UI_MARGIN, UI_MARGIN))
-            screen.blit(best_text, (UI_MARGIN, UI_MARGIN + UI_LINE_HEIGHT))
-            screen.blit(last_text, (UI_MARGIN, UI_MARGIN + UI_LINE_HEIGHT * 2))
+            # Use fixed width to prevent wobbling (wide enough for longest possible time format)
+            fixed_width = 200  # Fixed width that accommodates "Time: 60.00s" and similar
+            total_height = time_text.get_height() * 3 + self.box_margin * 2
+            
+            # Create rectangle for background with fixed width
+            rect_width = fixed_width + self.box_padding * 2
+            rect_height = total_height + self.box_padding * 2
+            timer_rect = pygame.Rect(UI_MARGIN, UI_MARGIN, rect_width, rect_height)
+            
+            # Draw styled background
+            self.draw_rounded_rect_with_border(screen, timer_rect, self.box_bg_color, 
+                                             self.border_color, self.border_width, self.border_radius)
+            
+            # Draw text inside the rectangle
+            text_x = UI_MARGIN + self.box_padding
+            text_y = UI_MARGIN + self.box_padding
+            
+            screen.blit(time_text, (text_x, text_y))
+            screen.blit(best_text, (text_x, text_y + time_text.get_height() + self.box_margin))
+            screen.blit(last_text, (text_x, text_y + (time_text.get_height() + self.box_margin) * 2))
     
     def draw_lap_counter(self, screen: pygame.Surface, timer: LapTimer):
-        """Draw lap counter on the right side."""
+        """Draw lap counter with styled rounded rectangle background."""
         lap_text = self.font.render(f"Lap: {timer.lap_count}", True, WHITE)
-        screen.blit(lap_text, (SCREEN_WIDTH - 150, UI_MARGIN))
+        
+        # Calculate rectangle size
+        rect_width = lap_text.get_width() + self.box_padding * 2
+        rect_height = lap_text.get_height() + self.box_padding * 2
+        
+        # Position on the right side
+        rect_x = SCREEN_WIDTH - rect_width - UI_MARGIN
+        lap_rect = pygame.Rect(rect_x, UI_MARGIN, rect_width, rect_height)
+        
+        # Draw styled background
+        self.draw_rounded_rect_with_border(screen, lap_rect, self.box_bg_color, 
+                                         self.border_color, self.border_width, self.border_radius)
+        
+        # Draw text inside the rectangle
+        text_x = rect_x + self.box_padding
+        text_y = UI_MARGIN + self.box_padding
+        screen.blit(lap_text, (text_x, text_y))
     
     def draw_car_info(self, screen: pygame.Surface, car: Car):
         """Draw car information (throttle/brake indicators only) on the right side."""
@@ -636,10 +716,10 @@ class GameUI:
         # Throttle/Brake indicators
         if car.throttle > 0:
             throttle_text = self.small_font.render(f"Throttle: {car.throttle*100:.0f}%", True, GREEN)
-            screen.blit(throttle_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2))
+            screen.blit(throttle_text, (SCREEN_WIDTH - 150, UI_MARGIN + 80))
         elif car.brake > 0:
             brake_text = self.small_font.render(f"Brake: {car.brake*100:.0f}%", True, RED)
-            screen.blit(brake_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2))
+            screen.blit(brake_text, (SCREEN_WIDTH - 150, UI_MARGIN + 80))
     
     def draw_controls_help(self, screen: pygame.Surface):
         """Draw control instructions at the bottom of the screen."""
