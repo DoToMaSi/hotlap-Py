@@ -60,7 +60,7 @@ SHIFT_UP_SPEEDS = {1: 1.5, 2: 2.8, 3: 4.2, 4: 5.8}  # Shift up at these speeds
 SHIFT_DOWN_SPEEDS = {5: 5.0, 4: 3.5, 3: 2.2, 2: 1.0}  # Shift down below these speeds
 
 # UI settings
-FONT_SIZE = 36
+FONT_SIZE = 28
 UI_MARGIN = 10
 UI_LINE_HEIGHT = 40
 
@@ -609,8 +609,8 @@ class GameUI:
     
     def __init__(self):
         """Initialize UI components."""
-        self.font = pygame.font.Font(None, FONT_SIZE)
-        self.small_font = pygame.font.Font(None, 24)
+        self.font = pygame.font.Font('assets/fonts/SmoochSans-Bold.ttf', FONT_SIZE)
+        self.small_font = pygame.font.Font('assets/fonts/SmoochSans-Bold.ttf', 18)
         
         # UI styling constants
         self.box_padding = 12
@@ -711,15 +711,9 @@ class GameUI:
         screen.blit(lap_text, (text_x, text_y))
     
     def draw_car_info(self, screen: pygame.Surface, car: Car):
-        """Draw car information (throttle/brake indicators only) on the right side."""
-        
-        # Throttle/Brake indicators
-        if car.throttle > 0:
-            throttle_text = self.small_font.render(f"Throttle: {car.throttle*100:.0f}%", True, GREEN)
-            screen.blit(throttle_text, (SCREEN_WIDTH - 150, UI_MARGIN + 80))
-        elif car.brake > 0:
-            brake_text = self.small_font.render(f"Brake: {car.brake*100:.0f}%", True, RED)
-            screen.blit(brake_text, (SCREEN_WIDTH - 150, UI_MARGIN + 80))
+        """Draw car information on the right side."""
+        # Throttle/Brake indicators removed for cleaner UI
+        pass
     
     def draw_controls_help(self, screen: pygame.Surface):
         """Draw control instructions at the bottom of the screen."""
