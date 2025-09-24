@@ -27,9 +27,9 @@ engine_sound = pygame.mixer.Sound('assets/car.wav')
 collision_sound = pygame.mixer.Sound('assets/collision.wav')
 
 # Car properties
-car_width, car_height = 53, 102
-car_x = WIDTH // 2 - car_width // 2  # Start in the center horizontally
-car_y = HEIGHT - car_height - 10     # Start near the bottom
+car_width, car_height = 35, 70  # Made smaller: was 53x102, now 35x70
+car_x = 240  # Start slightly to the right of the start line
+car_y = 320  # Start slightly below the start line center
 car_speed = 5
 car_angle = 0  # Facing up initially (0 degrees)
 
@@ -38,14 +38,14 @@ car_rect = pygame.Rect(car_x, car_y, car_width, car_height)
 
 # Track boundaries (simple oval-like track using rects for walls)
 track_walls = [
-    pygame.Rect(100, 100, 600, 10),  # Top wall
-    pygame.Rect(100, 490, 600, 10),  # Bottom wall
-    pygame.Rect(100, 100, 10, 400),   # Left wall
-    pygame.Rect(690, 100, 10, 400)    # Right wall
+    pygame.Rect(200, 150, 400, 10),  # Top wall - smaller track area
+    pygame.Rect(200, 440, 400, 10),  # Bottom wall - smaller track area
+    pygame.Rect(200, 150, 10, 300),  # Left wall - smaller track area
+    pygame.Rect(590, 150, 10, 300)   # Right wall - smaller track area
 ]
 
-# Start/Finish line (horizontal line at bottom)
-start_line = pygame.Rect(200, 500, 400, 10)
+# Start/Finish line (vertical line on the left-center)
+start_line = pygame.Rect(210, 250, 10, 100)  # Left-center position, shorter line
 
 # Timer variables
 start_time = None
@@ -83,9 +83,9 @@ while running:
         car_x -= car_speed * math.sin(math.radians(car_angle)) / 2  # Slower reverse
         car_y += car_speed * math.cos(math.radians(car_angle)) / 2
     if keys[pygame.K_LEFT]:
-        car_angle += 3  # Turn left
+        car_angle -= 3  # Turn left
     if keys[pygame.K_RIGHT]:
-        car_angle -= 3  # Turn right
+        car_angle += 3  # Turn right
 
     # Update car rect position
     car_rect.topleft = (car_x, car_y)
@@ -130,11 +130,10 @@ while running:
     # Draw start/finish line
     pygame.draw.rect(screen, GREEN, start_line)
 
-    # Draw car (rotated rectangle)
-    # For simplicity, draw a rect, but rotate it
-    rotated_car = pygame.transform.rotate(pygame.Surface((car_width, car_height)), car_angle)
-    rotated_car.fill(RED)
-    screen.blit(rotated_car, (car_x, car_y))
+    # Draw car (rotated)
+    rotated_car = pygame.transform.rotate(car_image, car_angle)
+    rotated_rect = rotated_car.get_rect(center=car_rect.center)
+    screen.blit(rotated_car, rotated_rect.topleft)
 
     # Display timer
     if start_time is not None:
