@@ -101,9 +101,15 @@ class Car:
         
         # Engine state
         self.engine_rpm = IDLE_RPM
-        self.throttle = 0.0         # 0.0 to 1.0
-        self.brake = 0.0            # 0.0 to 1.0
+        self.throttle = 0.0         # 0.0 to 1.0 (actual applied throttle)
+        self.brake = 0.0            # 0.0 to 1.0 (actual applied brake)
         self.steering = 0.0         # -1.0 to 1.0 (left to right)
+        
+        # Progressive input state
+        self.target_throttle = 0.0  # Target throttle from input
+        self.target_brake = 0.0     # Target brake from input
+        self.throttle_rate = 1.0 / 0.6  # Rate to reach full throttle in 0.6 seconds
+        self.brake_rate = 1.0 / 0.6     # Rate to reach full brake in 0.6 seconds
         
         # Transmission state
         self.current_gear = 1       # Start in first gear
@@ -128,9 +134,39 @@ class Car:
         self.throttle = 0.0
         self.brake = 0.0
         self.steering = 0.0
+        self.target_throttle = 0.0
+        self.target_brake = 0.0
         self.current_gear = 1
         self.gear_shift_timer = 0.0
         self.rect.topleft = (self.x, self.y)
+    
+    def update_progressive_inputs(self, dt: float):
+        """Update throttle and brake progressively towards target values."""
+        # Update throttle progressively
+        if self.target_throttle > self.throttle:
+            # Accelerating towards target
+            self.throttle = min(self.target_throttle, self.throttle + self.throttle_rate * dt)
+        elif self.target_throttle < self.throttle:
+            # Releasing throttle (faster release for more responsive feel)
+            release_rate = self.throttle_rate * 2.0  # Release twice as fast
+            self.throttle = max(self.target_throttle, self.throttle - release_rate * dt)
+        
+        # Update brake progressively
+        if self.target_brake > self.brake:
+            # Applying brake towards target
+            self.brake = min(self.target_brake, self.brake + self.brake_rate * dt)
+        elif self.target_brake < self.brake:
+            # Releasing brake (faster release for more responsive feel)
+            release_rate = self.brake_rate * 2.0  # Release twice as fast
+            self.brake = max(self.target_brake, self.brake - release_rate * dt)
+    
+    def set_throttle_input(self, input_value: float):
+        """Set target throttle from input (0.0 to 1.0)."""
+        self.target_throttle = max(0.0, min(1.0, input_value))
+    
+    def set_brake_input(self, input_value: float):
+        """Set target brake from input (0.0 to 1.0)."""
+        self.target_brake = max(0.0, min(1.0, input_value))
     
     def get_current_gear_ratio(self) -> float:
         """Get the current gear ratio."""
@@ -312,33 +348,45 @@ class Car:
         self.rect.topleft = (self.x, self.y)
     
     def update_position(self, keys: pygame.key.ScancodeWrapper) -> bool:
-        """Update car position based on key input with realistic physics."""
-        # Reset input states
-        self.throttle = 0.0
-        self.brake = 0.0
+        """Update car position based on key input with realistic progressive physics."""
+        # Calculate delta time (assuming 60 FPS)
+        dt = 1.0 / 60.0
+        
+        # Reset target input states
+        self.target_throttle = 0.0
+        self.target_brake = 0.0
         self.steering = 0.0
         moving_forward = False
         
-        # Throttle input
-        if keys[pygame.K_UP]:
-            self.throttle = 1.0
+        # Throttle input (progressive) - Arrow keys and WASD
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
+            self.set_throttle_input(1.0)
             moving_forward = True
+        else:
+            self.set_throttle_input(0.0)
             
-        # Brake/Reverse input
-        if keys[pygame.K_DOWN]:
+        # Brake/Reverse input (progressive) - Arrow keys and WASD
+        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             if self.velocity > 0.5:
                 # Braking while moving forward
-                self.brake = 1.0
+                self.set_brake_input(1.0)
+                self.set_throttle_input(0.0)  # Can't throttle while braking
             else:
                 # Reverse throttle
-                self.throttle = -0.7  # Reduced reverse power
+                self.set_throttle_input(-0.7)  # Reduced reverse power
+                self.set_brake_input(0.0)
+        else:
+            self.set_brake_input(0.0)
             
-        # Steering input
-        if keys[pygame.K_LEFT]:
+        # Steering input (still immediate for responsiveness) - Arrow keys and WASD
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             self.steering = -1.0
             
-        if keys[pygame.K_RIGHT]:
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.steering = 1.0
+        
+        # Update progressive inputs
+        self.update_progressive_inputs(dt)
         
         # Update engine RPM
         self.update_engine_rpm()
@@ -583,41 +631,15 @@ class GameUI:
         screen.blit(lap_text, (SCREEN_WIDTH - 150, UI_MARGIN))
     
     def draw_car_info(self, screen: pygame.Surface, car: Car):
-        """Draw car information (speed, RPM, gear) on the right side."""
-        speed_kmh = car.get_speed_kmh()
-        gear = car.get_gear()
-        rpm = int(car.engine_rpm)
-        
-        # Speed display
-        speed_text = self.font.render(f"{speed_kmh:.0f} km/h", True, WHITE)
-        screen.blit(speed_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT))
-        
-        # Gear display with gear ratio information
-        gear_display = f"Gear {gear}"
-        if car.velocity < -0.1:
-            gear_display = "R"
-        elif gear == 0:
-            gear_display = "N"
-        
-        gear_text = self.small_font.render(gear_display, True, WHITE)
-        screen.blit(gear_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2))
-        
-        # Show gear ratio for information
-        gear_ratio = car.get_current_gear_ratio()
-        ratio_text = self.small_font.render(f"Ratio: {gear_ratio:.1f}", True, WHITE)
-        screen.blit(ratio_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2 + 20))
-        
-        # RPM display
-        rpm_text = self.small_font.render(f"RPM: {rpm}", True, WHITE)
-        screen.blit(rpm_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2 + 25))
+        """Draw car information (throttle/brake indicators only) on the right side."""
         
         # Throttle/Brake indicators
         if car.throttle > 0:
             throttle_text = self.small_font.render(f"Throttle: {car.throttle*100:.0f}%", True, GREEN)
-            screen.blit(throttle_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 3))
+            screen.blit(throttle_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2))
         elif car.brake > 0:
             brake_text = self.small_font.render(f"Brake: {car.brake*100:.0f}%", True, RED)
-            screen.blit(brake_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 3))
+            screen.blit(brake_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2))
     
     def draw_controls_help(self, screen: pygame.Surface):
         """Draw control instructions at the bottom of the screen."""
@@ -641,33 +663,15 @@ class AudioManager:
         self.min_pitch = 0.6          # Minimum pitch multiplier (low RPM)
         self.max_pitch = 2.0          # Maximum pitch multiplier (high RPM)
     
-    def calculate_pitch_from_rpm(self, rpm: float) -> float:
-        """Calculate pitch multiplier based on RPM."""
-        # Normalize RPM to 0-1 range
-        rpm_normalized = (rpm - IDLE_RPM) / (MAX_RPM - IDLE_RPM)
-        rpm_normalized = max(0.0, min(1.0, rpm_normalized))
+    def calculate_pitch_from_speed(self, velocity: float) -> float:
+        """Calculate pitch multiplier based on car speed for smoother audio."""
+        # Normalize velocity to 0-1 range based on max speed
+        speed_normalized = abs(velocity) / MAX_SPEED
+        speed_normalized = max(0.0, min(1.0, speed_normalized))
         
-        # Calculate pitch using exponential curve for more realistic sound
-        pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * (rpm_normalized ** 0.7)
-        return pitch
-    
-    def calculate_pitch_from_rpm_and_gear(self, rpm: float, gear: int) -> float:
-        """Calculate pitch multiplier based on RPM and gear for more realistic engine sound."""
-        # Base pitch from RPM
-        rpm_normalized = (rpm - IDLE_RPM) / (MAX_RPM - IDLE_RPM)
-        rpm_normalized = max(0.0, min(1.0, rpm_normalized))
-        
-        # Gear affects the pitch character - lower gears sound "tighter" and higher pitched
-        gear_pitch_modifier = 1.0 + (0.15 * (6 - gear) / 5.0)  # Higher pitch for lower gears
-        
-        # Calculate base pitch using exponential curve
-        base_pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * (rpm_normalized ** 0.7)
-        
-        # Apply gear modification
-        final_pitch = base_pitch * gear_pitch_modifier
-        
-        # Clamp to reasonable bounds
-        return max(0.5, min(3.0, final_pitch))
+        # Calculate pitch using smooth curve for natural sound progression
+        pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * (speed_normalized ** 0.5)
+        return max(0.7, min(2.5, pitch))  # Clamp to reasonable bounds
     
     def create_pitched_sound(self, original_sound: pygame.mixer.Sound, pitch: float) -> pygame.mixer.Sound:
         """Create a new sound with modified pitch (simplified approach)."""
@@ -714,46 +718,54 @@ class AudioManager:
         self.engine_channel = None
     
     def update_engine_sound(self, car: Car):
-        """Update engine sound based on car's engine RPM and gear with pitch shifting."""
-        engine_active = car.engine_rpm > IDLE_RPM or abs(car.velocity) > 0.1
+        """Update engine sound based on car's speed with pitch shifting. Engine always rumbles at idle."""
+        # Engine is always active - always rumbling
         
-        if engine_active:
-            # Calculate target pitch based on RPM and gear
-            target_pitch = self.calculate_pitch_from_rpm_and_gear(car.engine_rpm, car.current_gear)
+        # Calculate target pitch based on speed, with minimum idle pitch
+        base_pitch = self.calculate_pitch_from_speed(car.velocity)
+        idle_pitch = 0.8  # Minimum pitch for idle rumble
+        target_pitch = max(idle_pitch, base_pitch)
+        
+        # Start engine sound if not already playing
+        if not self.engine_playing or not (self.engine_channel and self.engine_channel.get_busy()):
+            try:
+                pitched_sound = self.create_pitched_sound(self.assets.original_engine_sound, target_pitch)
+                self.engine_channel = pitched_sound.play(-1)  # Loop
+            except:
+                # Fallback: use original sound
+                self.engine_channel = self.assets.engine_sound.play(-1)
             
-            # Only update if pitch changed significantly (to avoid constant recreating)
-            if abs(target_pitch - self.current_pitch) > 0.1:
-                self.current_pitch = target_pitch
-                
-                # Stop current sound
-                if self.engine_channel and self.engine_channel.get_busy():
-                    self.engine_channel.stop()
-                
-                # Create pitched sound (fallback to volume control if pitch shifting fails)
-                try:
-                    pitched_sound = self.create_pitched_sound(self.assets.original_engine_sound, self.current_pitch)
-                    self.engine_channel = pitched_sound.play(-1)  # Loop
-                except:
-                    # Fallback: use original sound with volume modulation
-                    self.engine_channel = self.assets.engine_sound.play(-1)
-                
-                self.engine_playing = True
+            self.engine_playing = True
+            self.current_pitch = target_pitch
+        
+        # Only update pitch if it changed significantly (to avoid constant recreating)
+        elif abs(target_pitch - self.current_pitch) > 0.05:
+            self.current_pitch = target_pitch
             
-            # Adjust volume based on RPM, throttle, and gear
+            # Stop current sound
             if self.engine_channel and self.engine_channel.get_busy():
-                rpm_factor = (car.engine_rpm - IDLE_RPM) / (MAX_RPM - IDLE_RPM)
-                throttle_factor = max(0.3, car.throttle + 0.3)  # Minimum volume even at idle
-                
-                # Gear factor: lower gears are typically louder/more aggressive
-                gear_factor = 1.0 + (0.2 * (6 - car.current_gear) / 5.0)  # Higher multiplier for lower gears
-                
-                volume = 0.2 + (rpm_factor * 0.6) * throttle_factor * gear_factor
-                volume = max(0.2, min(0.8, volume))  # Clamp between 0.2 and 0.8
-                self.engine_channel.set_volume(volume)
-        else:
-            if self.engine_playing and self.engine_channel:
                 self.engine_channel.stop()
-                self.engine_playing = False
+            
+            # Create new pitched sound
+            try:
+                pitched_sound = self.create_pitched_sound(self.assets.original_engine_sound, self.current_pitch)
+                self.engine_channel = pitched_sound.play(-1)  # Loop
+            except:
+                # Fallback: use original sound
+                self.engine_channel = self.assets.engine_sound.play(-1)
+        
+        # Adjust volume - always has minimum idle volume
+        if self.engine_channel and self.engine_channel.get_busy():
+            speed_factor = abs(car.velocity) / MAX_SPEED
+            throttle_factor = max(0.2, car.throttle + 0.2)  # Base idle volume
+            
+            # Calculate volume with minimum idle level
+            idle_volume = 0.25  # Minimum idle rumble volume
+            active_volume = 0.4 + (speed_factor * 0.4) * throttle_factor
+            volume = max(idle_volume, active_volume)
+            volume = min(0.8, volume)  # Cap maximum volume
+            
+            self.engine_channel.set_volume(volume)
     
     def play_collision_sound(self):
         """Play collision sound effect."""
