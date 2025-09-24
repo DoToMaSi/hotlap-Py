@@ -60,7 +60,7 @@ SHIFT_UP_SPEEDS = {1: 1.5, 2: 2.8, 3: 4.2, 4: 5.8}  # Shift up at these speeds
 SHIFT_DOWN_SPEEDS = {5: 5.0, 4: 3.5, 3: 2.2, 2: 1.0}  # Shift down below these speeds
 
 # UI settings
-FONT_SIZE = 28
+FONT_SIZE = 22
 UI_MARGIN = 10
 UI_LINE_HEIGHT = 40
 
@@ -669,7 +669,7 @@ class GameUI:
             last_text = self.font.render(f"Last: {last_display}", True, WHITE)
             
             # Use fixed width to prevent wobbling (wide enough for longest possible time format)
-            fixed_width = 200  # Fixed width that accommodates "Time: 60.00s" and similar
+            fixed_width = 100  # Reduced from 200 to fit smaller font size
             total_height = time_text.get_height() * 3 + self.box_margin * 2
             
             # Create rectangle for background with fixed width
