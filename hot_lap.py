@@ -29,7 +29,7 @@ CAR_HEIGHT = 70
 # Realistic car physics constants
 MAX_SPEED = 8.0              # Maximum forward speed
 MIN_SPEED = -4.0             # Maximum reverse speed
-ACCELERATION = 0.08          # Acceleration rate (reduced from 0.15 for slower buildup)
+ACCELERATION = 0.04          # Base acceleration rate (reduced from 0.08 for much slower buildup)
 DECELERATION = 0.2           # Natural deceleration (friction)
 BRAKE_FORCE = 0.5            # Braking force
 TURN_SPEED_BASE = 4.0        # Base turning speed
@@ -43,6 +43,21 @@ ENGINE_POWER_MAX = 150       # Maximum power (HP)
 OPTIMAL_RPM = 3500           # RPM for maximum power
 MAX_RPM = 6000               # Redline RPM
 IDLE_RPM = 800               # Idle RPM
+
+# Realistic gear ratios (first gear = highest ratio, more torque multiplication)
+GEAR_RATIOS = {
+    -1: -3.5,    # Reverse gear
+    0: 0.0,      # Neutral
+    1: 3.5,      # First gear (high torque, low top speed)
+    2: 2.1,      # Second gear
+    3: 1.4,      # Third gear
+    4: 1.0,      # Fourth gear (1:1 ratio)
+    5: 0.8       # Fifth gear (overdrive, high top speed, low torque)
+}
+
+# Gear shift points (speed thresholds for automatic shifting)
+SHIFT_UP_SPEEDS = {1: 1.5, 2: 2.8, 3: 4.2, 4: 5.8}  # Shift up at these speeds
+SHIFT_DOWN_SPEEDS = {5: 5.0, 4: 3.5, 3: 2.2, 2: 1.0}  # Shift down below these speeds
 
 # UI settings
 FONT_SIZE = 36
@@ -90,6 +105,10 @@ class Car:
         self.brake = 0.0            # 0.0 to 1.0
         self.steering = 0.0         # -1.0 to 1.0 (left to right)
         
+        # Transmission state
+        self.current_gear = 1       # Start in first gear
+        self.gear_shift_timer = 0.0 # Delay between shifts
+        
         # Collision rectangle
         self.rect = pygame.Rect(x, y, CAR_WIDTH, CAR_HEIGHT)
         
@@ -109,10 +128,54 @@ class Car:
         self.throttle = 0.0
         self.brake = 0.0
         self.steering = 0.0
+        self.current_gear = 1
+        self.gear_shift_timer = 0.0
         self.rect.topleft = (self.x, self.y)
+    
+    def get_current_gear_ratio(self) -> float:
+        """Get the current gear ratio."""
+        return GEAR_RATIOS.get(self.current_gear, 1.0)
+    
+    def should_shift_up(self) -> bool:
+        """Determine if car should shift to higher gear."""
+        if self.current_gear >= 5 or self.current_gear <= 0:
+            return False
+        
+        speed_threshold = SHIFT_UP_SPEEDS.get(self.current_gear, float('inf'))
+        return abs(self.velocity) > speed_threshold and self.gear_shift_timer <= 0
+    
+    def should_shift_down(self) -> bool:
+        """Determine if car should shift to lower gear."""
+        if self.current_gear <= 1 or self.current_gear > 5:
+            return False
+        
+        speed_threshold = SHIFT_DOWN_SPEEDS.get(self.current_gear, 0)
+        return abs(self.velocity) < speed_threshold and self.gear_shift_timer <= 0
+    
+    def shift_gear(self, direction: int):
+        """Shift gear up (+1) or down (-1)."""
+        if direction > 0 and self.current_gear < 5:
+            self.current_gear += 1
+        elif direction < 0 and self.current_gear > 1:
+            self.current_gear -= 1
+        
+        # Set shift delay to prevent rapid shifting
+        self.gear_shift_timer = 0.5  # 0.5 seconds between shifts
+    
+    def update_transmission(self, dt: float = 1/60):
+        """Update automatic transmission logic."""
+        # Update shift timer
+        if self.gear_shift_timer > 0:
+            self.gear_shift_timer -= dt
+        
+        # Automatic shifting logic
+        if self.should_shift_up():
+            self.shift_gear(1)
+        elif self.should_shift_down():
+            self.shift_gear(-1)
         
     def calculate_engine_torque(self) -> float:
-        """Calculate engine torque based on RPM and throttle."""
+        """Calculate engine torque based on RPM and throttle, multiplied by gear ratio."""
         if self.engine_rpm < IDLE_RPM:
             return 0.0
             
@@ -120,14 +183,31 @@ class Car:
         rpm_factor = 1.0 - ((self.engine_rpm - OPTIMAL_RPM) / MAX_RPM) ** 2
         rpm_factor = max(0.3, rpm_factor)  # Minimum torque factor
         
-        return ENGINE_TORQUE_MAX * rpm_factor * self.throttle
+        # Base engine torque
+        base_torque = ENGINE_TORQUE_MAX * rpm_factor * self.throttle
+        
+        # Apply gear ratio (higher ratio = more torque multiplication)
+        gear_ratio = abs(self.get_current_gear_ratio())  # Use absolute value
+        final_torque = base_torque * gear_ratio
+        
+        return final_torque
     
     def calculate_engine_power(self) -> float:
-        """Calculate engine power based on RPM and torque."""
+        """Calculate engine power based on RPM, torque, and gear ratio."""
         torque = self.calculate_engine_torque()
-        # Power = Torque × RPM / 5252 (converted to relative units)
+        
+        # Power = Torque × RPM (simplified)
         power_factor = min(1.0, self.engine_rpm / OPTIMAL_RPM)
-        return (torque * power_factor * self.engine_rpm) / 1000  # Scaled for gameplay
+        base_power = (torque * power_factor * self.engine_rpm) / 1000  # Scaled for gameplay
+        
+        # Gear affects power delivery efficiency
+        gear_ratio = self.get_current_gear_ratio()
+        if gear_ratio != 0:
+            # Higher gears are more efficient at high speeds, lower gears at low speeds
+            efficiency = 0.8 + 0.2 / abs(gear_ratio)  # Higher efficiency for higher gears
+            return base_power * efficiency
+        
+        return 0.0
     
     def update_engine_rpm(self):
         """Update engine RPM based on throttle and current speed."""
@@ -157,13 +237,27 @@ class Car:
         return max(0.3, 1.0 - traction_loss)  # Minimum 30% traction
     
     def update_physics(self):
-        """Update car physics for realistic movement."""
-        # Calculate forces
-        engine_force = self.calculate_engine_power() * 0.05  # Reduced from 0.1 for slower acceleration
+        """Update car physics for realistic movement with proper gearing."""
+        # Update transmission first
+        self.update_transmission()
+        
+        # Calculate forces with gear-adjusted power
+        engine_force = self.calculate_engine_power() * 0.03  # Further reduced from 0.05 for slower acceleration
+        
+        # Handle reverse gear
+        gear_ratio = self.get_current_gear_ratio()
+        if gear_ratio < 0:  # Reverse gear
+            engine_force = -engine_force * 0.7  # Reduced power in reverse
         
         # Speed-dependent power reduction (realistic aerodynamic drag effect)
-        speed_drag_factor = 1.0 - (abs(self.velocity) / MAX_SPEED) * 0.3
-        engine_force *= max(0.4, speed_drag_factor)  # Minimum 40% power at top speed
+        speed_drag_factor = 1.0 - (abs(self.velocity) / MAX_SPEED) * 0.4
+        engine_force *= max(0.3, speed_drag_factor)  # Minimum 30% power at top speed
+        
+        # Gear-specific top speed limitation
+        if abs(self.velocity) > 0:
+            gear_max_speed = MAX_SPEED / max(1.0, abs(gear_ratio) * 0.8)  # Higher gears allow higher speeds
+            if abs(self.velocity) > gear_max_speed:
+                engine_force *= 0.1  # Severely limit power beyond gear's optimal range
         
         # Braking force
         brake_force = self.brake * BRAKE_FORCE
@@ -178,7 +272,7 @@ class Car:
         # Total acceleration
         traction = self.calculate_traction_factor()
         net_force = (engine_force + brake_force) * traction + friction_force
-        self.acceleration = net_force
+        self.acceleration = net_force * ACCELERATION  # Apply base acceleration multiplier
         
         # Update velocity
         self.velocity += self.acceleration
@@ -296,18 +390,8 @@ class Car:
         return abs(self.velocity) * 15  # Scale factor for realistic-feeling speeds
     
     def get_gear(self) -> int:
-        """Get current gear based on speed (for display)."""
-        speed = abs(self.velocity)
-        if speed < 0.5:
-            return 0  # Neutral/Park
-        elif speed < 2.0:
-            return 1
-        elif speed < 4.0:
-            return 2
-        elif speed < 6.0:
-            return 3
-        else:
-            return 4
+        """Get current gear (returns the actual transmission gear)."""
+        return self.current_gear
     
     def draw(self, screen: pygame.Surface, car_image: pygame.Surface):
         """Draw the car on the screen with proper rotation."""
@@ -342,6 +426,53 @@ class Track:
             if car.rect.colliderect(wall):
                 return True
         return False
+    
+    def handle_wall_collisions(self, car: Car) -> bool:
+        """Handle wall collisions with proper positioning and velocity reduction. Returns True if collision occurred."""
+        collision_occurred = False
+        
+        for wall in self.walls:
+            if car.rect.colliderect(wall):
+                collision_occurred = True
+                
+                # Determine which side of the wall was hit and reposition accordingly
+                car_center_x = car.x + CAR_WIDTH // 2
+                car_center_y = car.y + CAR_HEIGHT // 2
+                wall_center_x = wall.x + wall.width // 2
+                wall_center_y = wall.y + wall.height // 2
+                
+                # Calculate overlap distances
+                overlap_x = min(car.x + CAR_WIDTH - wall.x, wall.x + wall.width - car.x)
+                overlap_y = min(car.y + CAR_HEIGHT - wall.y, wall.y + wall.height - car.y)
+                
+                # Resolve collision by moving car to the side with smaller overlap
+                if overlap_x < overlap_y:
+                    # Horizontal collision - move car left or right
+                    if car_center_x < wall_center_x:
+                        # Car is to the left of wall, push it left
+                        car.x = wall.x - CAR_WIDTH
+                    else:
+                        # Car is to the right of wall, push it right
+                        car.x = wall.x + wall.width
+                else:
+                    # Vertical collision - move car up or down
+                    if car_center_y < wall_center_y:
+                        # Car is above wall, push it up
+                        car.y = wall.y - CAR_HEIGHT
+                    else:
+                        # Car is below wall, push it down
+                        car.y = wall.y + wall.height
+                
+                # Reduce velocity on collision (same as screen boundaries)
+                car.velocity *= 0.5
+                
+                # Update collision rectangle
+                car.rect.topleft = (car.x, car.y)
+                
+                # Only handle one collision per frame for stability
+                break
+        
+        return collision_occurred
     
     def check_checkpoint_collision(self, car: Car, checkpoints_crossed: List[bool]) -> List[bool]:
         """Check and update checkpoint crossings."""
@@ -453,12 +584,20 @@ class GameUI:
         speed_text = self.font.render(f"{speed_kmh:.0f} km/h", True, WHITE)
         screen.blit(speed_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT))
         
-        # Gear display
-        gear_display = "N" if gear == 0 else f"Gear {gear}"
+        # Gear display with gear ratio information
+        gear_display = f"Gear {gear}"
         if car.velocity < -0.1:
             gear_display = "R"
+        elif gear == 0:
+            gear_display = "N"
+        
         gear_text = self.small_font.render(gear_display, True, WHITE)
         screen.blit(gear_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2))
+        
+        # Show gear ratio for information
+        gear_ratio = car.get_current_gear_ratio()
+        ratio_text = self.small_font.render(f"Ratio: {gear_ratio:.1f}", True, WHITE)
+        screen.blit(ratio_text, (SCREEN_WIDTH - 150, UI_MARGIN + UI_LINE_HEIGHT * 2 + 20))
         
         # RPM display
         rpm_text = self.small_font.render(f"RPM: {rpm}", True, WHITE)
@@ -649,15 +788,12 @@ class Game:
         if engine_active and abs(self.car.velocity) > 0.1:
             self.timer.start_timing()
         
-        # Handle wall collisions
-        wall_collision = self.track.check_wall_collision(self.car)
+        # Handle wall collisions with improved positioning
+        wall_collision = self.track.handle_wall_collisions(self.car)
         boundary_collision = self.car.handle_screen_boundaries()
         
-        if wall_collision:
-            self.car.handle_collision()
-            self.audio.play_collision_sound()
-        elif boundary_collision:
-            # Play collision sound for screen boundary hits too
+        if wall_collision or boundary_collision:
+            # Play collision sound for both wall and boundary hits
             self.audio.play_collision_sound()
         
         # Update engine sound based on car state
