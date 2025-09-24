@@ -30,8 +30,8 @@ CAR_HEIGHT = 70
 MAX_SPEED = 8.0              # Maximum forward speed
 MIN_SPEED = -4.0             # Maximum reverse speed
 ACCELERATION = 0.04          # Base acceleration rate (reduced from 0.08 for much slower buildup)
-DECELERATION = 0.2           # Natural deceleration (friction)
-BRAKE_FORCE = 0.5            # Braking force
+DECELERATION = 0.4           # Natural deceleration (friction) - increased from 0.2
+BRAKE_FORCE = 1.2            # Braking force - increased from 0.5
 TURN_SPEED_BASE = 4.0        # Base turning speed
 TURN_SPEED_FACTOR = 0.6      # Speed-dependent turning factor
 TRACTION_LOSS_SPEED = 6.0    # Speed at which traction starts to decrease
@@ -269,9 +269,17 @@ class Car:
         # Natural friction/drag
         friction_force = -self.velocity * DECELERATION * FRICTION_COEFFICIENT
         
+        # Engine braking (more prominent in lower gears when not accelerating)
+        engine_brake_force = 0
+        if self.throttle <= 0 and abs(self.velocity) > 0.1 and self.current_gear > 0:
+            # Engine braking is stronger in lower gears
+            gear_brake_factor = (6 - self.current_gear) / 5.0  # Ranges from 0.2 (5th gear) to 1.0 (1st gear)
+            engine_brake_strength = 0.8 * gear_brake_factor
+            engine_brake_force = -self.velocity * engine_brake_strength
+        
         # Total acceleration
         traction = self.calculate_traction_factor()
-        net_force = (engine_force + brake_force) * traction + friction_force
+        net_force = (engine_force + brake_force) * traction + friction_force + engine_brake_force
         self.acceleration = net_force * ACCELERATION  # Apply base acceleration multiplier
         
         # Update velocity
@@ -643,6 +651,24 @@ class AudioManager:
         pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * (rpm_normalized ** 0.7)
         return pitch
     
+    def calculate_pitch_from_rpm_and_gear(self, rpm: float, gear: int) -> float:
+        """Calculate pitch multiplier based on RPM and gear for more realistic engine sound."""
+        # Base pitch from RPM
+        rpm_normalized = (rpm - IDLE_RPM) / (MAX_RPM - IDLE_RPM)
+        rpm_normalized = max(0.0, min(1.0, rpm_normalized))
+        
+        # Gear affects the pitch character - lower gears sound "tighter" and higher pitched
+        gear_pitch_modifier = 1.0 + (0.15 * (6 - gear) / 5.0)  # Higher pitch for lower gears
+        
+        # Calculate base pitch using exponential curve
+        base_pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * (rpm_normalized ** 0.7)
+        
+        # Apply gear modification
+        final_pitch = base_pitch * gear_pitch_modifier
+        
+        # Clamp to reasonable bounds
+        return max(0.5, min(3.0, final_pitch))
+    
     def create_pitched_sound(self, original_sound: pygame.mixer.Sound, pitch: float) -> pygame.mixer.Sound:
         """Create a new sound with modified pitch (simplified approach)."""
         # Note: This is a simplified pitch shifting approach
@@ -688,12 +714,12 @@ class AudioManager:
         self.engine_channel = None
     
     def update_engine_sound(self, car: Car):
-        """Update engine sound based on car's engine RPM with pitch shifting."""
+        """Update engine sound based on car's engine RPM and gear with pitch shifting."""
         engine_active = car.engine_rpm > IDLE_RPM or abs(car.velocity) > 0.1
         
         if engine_active:
-            # Calculate target pitch
-            target_pitch = self.calculate_pitch_from_rpm(car.engine_rpm)
+            # Calculate target pitch based on RPM and gear
+            target_pitch = self.calculate_pitch_from_rpm_and_gear(car.engine_rpm, car.current_gear)
             
             # Only update if pitch changed significantly (to avoid constant recreating)
             if abs(target_pitch - self.current_pitch) > 0.1:
@@ -713,12 +739,16 @@ class AudioManager:
                 
                 self.engine_playing = True
             
-            # Adjust volume based on RPM and throttle
+            # Adjust volume based on RPM, throttle, and gear
             if self.engine_channel and self.engine_channel.get_busy():
                 rpm_factor = (car.engine_rpm - IDLE_RPM) / (MAX_RPM - IDLE_RPM)
                 throttle_factor = max(0.3, car.throttle + 0.3)  # Minimum volume even at idle
-                volume = 0.2 + (rpm_factor * 0.6) * throttle_factor  # Volume between 0.2 and 0.8
-                volume = max(0.2, min(0.8, volume))
+                
+                # Gear factor: lower gears are typically louder/more aggressive
+                gear_factor = 1.0 + (0.2 * (6 - car.current_gear) / 5.0)  # Higher multiplier for lower gears
+                
+                volume = 0.2 + (rpm_factor * 0.6) * throttle_factor * gear_factor
+                volume = max(0.2, min(0.8, volume))  # Clamp between 0.2 and 0.8
                 self.engine_channel.set_volume(volume)
         else:
             if self.engine_playing and self.engine_channel:
