@@ -73,17 +73,17 @@ class GameAssets:
         pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)  # Higher quality for pitch shifting
         
         # Load images
-        self.track_image = pygame.image.load('assets/track.png')
+        self.track_image = pygame.image.load('assets/images/track.png')
         # Load and vertically flip the car image to correct orientation
-        car_image_raw = pygame.image.load('assets/car.png')
+        car_image_raw = pygame.image.load('assets/images/car.png')
         self.car_image = pygame.transform.flip(car_image_raw, False, True)
         
         # Load sounds
-        self.engine_sound = pygame.mixer.Sound('assets/car.wav')
-        self.collision_sound = pygame.mixer.Sound('assets/collision.wav')
+        self.engine_sound = pygame.mixer.Sound('assets/sounds/car.wav')
+        self.collision_sound = pygame.mixer.Sound('assets/sounds/collision.wav')
         
         # Store original engine sound data for pitch shifting
-        self.original_engine_sound = pygame.mixer.Sound('assets/car.wav')
+        self.original_engine_sound = pygame.mixer.Sound('assets/sounds/car.wav')
 
 
 class Car:
